@@ -54,9 +54,10 @@ def calculate_score(seeker: JobMatchRequest, job: Job, seeker_embedding: List[fl
     return total_score
 
 # Health check endpoint
-@app.get("/")
-def read_root():
-    return {"message": "FastAPI is running!"}
+@app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)  # Add this line
+async def root():
+    return {"message": "Service is running"}
 
 # API endpoint for recommending jobs
 @app.post("/recommend_jobs")
