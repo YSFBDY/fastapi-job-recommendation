@@ -2,6 +2,7 @@ import os
 import re
 import nltk
 import uvicorn
+import gc
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -10,27 +11,27 @@ from fastapi.encoders import jsonable_encoder
 from typing import List, Optional
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+from functools import lru_cache
 
-# Ensure NLTK resources are available
-nltk.download('stopwords')
-nltk.download('wordnet')
+# Ensure NLTK resources are available (download manually before deployment)
+nltk_stopwords = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+# Lazy load model to reduce memory usage
+@lru_cache(maxsize=1)
+def get_model():
+    return SentenceTransformer('sentence-transformers/paraphrase-MiniLM-L6-v2')
 
 # Initialize the API application
 app = FastAPI()
 
-# Load the pre-trained model
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-
 # Preprocessing function to clean and normalize text
 def preprocess_text(text: str) -> str:
-    text = text.lower()  # Lowercase
-    text = re.sub(r'[^a-z\s]', '', text)  # Remove special characters and numbers
-    tokens = text.split()
-    stop_words = set(stopwords.words('english'))
-    tokens = [word for word in tokens if word not in stop_words]
-    lemmatizer = WordNetLemmatizer()
-    tokens = [lemmatizer.lemmatize(word) for word in tokens]
-    return " ".join(tokens)
+    text = text.lower()
+    text = re.sub(r'[^a-z\s]', '', text)
+    words = text.split()
+    words = [lemmatizer.lemmatize(word) for word in words if word not in nltk_stopwords]
+    return ' '.join(words)
 
 # Define Pydantic models for input data
 class Job(BaseModel):
@@ -50,12 +51,11 @@ class JobMatchRequest(BaseModel):
 def calculate_score(seeker: JobMatchRequest, job: Job, seeker_embedding: List[float], job_embedding: List[float]) -> float:
     textual_similarity = cosine_similarity([seeker_embedding], [job_embedding])[0][0]
     country_match = 1 if seeker.seeker_country.lower() == job.country.lower() else 0
-    total_score = (0.9 * textual_similarity) + (0.1 * country_match)
-    return total_score
+    return (0.9 * textual_similarity) + (0.1 * country_match)
 
 # Health check endpoint
 @app.get("/", include_in_schema=False)
-@app.head("/", include_in_schema=False)  # Add this line
+@app.head("/", include_in_schema=False)
 async def root():
     return {"message": "Service is running"}
 
@@ -64,22 +64,26 @@ async def root():
 def recommend_jobs(request: JobMatchRequest):
     try:
         seeker_text = preprocess_text(request.seeker_headline + " " + " ".join(request.seeker_skills))
-        seeker_embedding = model.encode(seeker_text).tolist()
+        seeker_embedding = get_model().encode(seeker_text).tolist()
         job_scores = []
         
         for job in request.jobs:
             job_text = preprocess_text(job.title + " " + (job.about or "") + " " + " ".join(job.skills or []))
-            job_embedding = model.encode(job_text).tolist()
+            job_embedding = get_model().encode(job_text).tolist()
             score = calculate_score(request, job, seeker_embedding, job_embedding)
             if score >= 0.25:
                 job_scores.append({"job_id": job.job_id, "title": job.title, "score": score})
         
         job_scores.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Free up memory after processing
+        gc.collect()
+        
         return jsonable_encoder(job_scores)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # Run the server (only if executed directly)
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))  # Default to 10000 if PORT is not set
-    uvicorn.run(app, host="127.0.0.2", port=8001)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, workers=1)
