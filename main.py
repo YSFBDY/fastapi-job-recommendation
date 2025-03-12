@@ -1,11 +1,13 @@
+import os
+import re
+import nltk
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from fastapi.encoders import jsonable_encoder
 from typing import List, Optional
-import re
-import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 
@@ -13,8 +15,10 @@ from nltk.stem import WordNetLemmatizer
 nltk.download('stopwords')
 nltk.download('wordnet')
 
-# Initialize the API application and load the pre-trained model
+# Initialize the API application
 app = FastAPI()
+
+# Load the pre-trained model
 model = SentenceTransformer('sentence-transformers/paraphrase-mpnet-base-v2')
 
 # Preprocessing function to clean and normalize text
@@ -49,6 +53,11 @@ def calculate_score(seeker: JobMatchRequest, job: Job, seeker_embedding: List[fl
     total_score = (0.9 * textual_similarity) + (0.1 * country_match)
     return total_score
 
+# Health check endpoint
+@app.get("/")
+def read_root():
+    return {"message": "FastAPI is running!"}
+
 # API endpoint for recommending jobs
 @app.post("/recommend_jobs")
 def recommend_jobs(request: JobMatchRequest):
@@ -68,3 +77,8 @@ def recommend_jobs(request: JobMatchRequest):
         return jsonable_encoder(job_scores)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Run the server (only if executed directly)
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))  # Default to 10000 if PORT is not set
+    uvicorn.run(app, host="0.0.0.0", port=port)
