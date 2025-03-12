@@ -19,7 +19,7 @@ nltk.download('wordnet')
 app = FastAPI()
 
 # Load the pre-trained model
-model = SentenceTransformer('sentence-transformers/paraphrase-mpnet-base-v2')
+model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
 # Preprocessing function to clean and normalize text
 def preprocess_text(text: str) -> str:
@@ -82,4 +82,4 @@ def recommend_jobs(request: JobMatchRequest):
 # Run the server (only if executed directly)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))  # Default to 10000 if PORT is not set
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="127.0.0.2", port=8001)
